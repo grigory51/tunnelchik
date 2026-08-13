@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -11,47 +10,61 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 func main() {
-	var configPath string
-	flag.StringVar(&configPath, "config", "/etc/tunnelchik/config.yaml", "path to the YAML config")
-	flag.Parse()
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	if err := newRootCommand().ExecuteContext(ctx); err != nil {
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("command failed", "error", err)
+		os.Exit(1)
+	}
+}
 
+func newRootCommand() *cobra.Command {
+	var configPath string
+	command := &cobra.Command{
+		Use:           "tunnelchik",
+		Short:         "SSH gateway with ZITADEL authorization and session recording",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return runGateway(command.Context(), configPath)
+		},
+	}
+	command.Flags().StringVar(&configPath, "config", "/etc/tunnelchik/config.yaml", "path to the YAML config")
+	return command
+}
+
+func runGateway(ctx context.Context, configPath string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	loadedConfig, err := loadConfig(configPath)
 	if err != nil {
-		logger.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("load config: %w", err)
 	}
 	hostKey, err := loadHostKey(loadedConfig.HostKey)
 	if err != nil {
-		logger.Error("failed to load host key", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("load host key: %w", err)
 	}
 	hostKeyCallback, err := knownhosts.New(loadedConfig.KnownHosts)
 	if err != nil {
-		logger.Error("failed to load known_hosts", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("load known_hosts: %w", err)
 	}
 	if err := prepareRecordingsRoot(loadedConfig.RecordingsDir); err != nil {
-		logger.Error("failed to prepare recordings directory", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("prepare recordings directory: %w", err)
 	}
 
-	shutdownContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
-	authorizer, err := newAuthorizer(shutdownContext, loadedConfig.OIDC)
+	authorizer, err := newAuthorizer(ctx, loadedConfig.OIDC)
 	if err != nil {
-		logger.Error("failed to initialize OIDC", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("initialize OIDC: %w", err)
 	}
 	listener, err := net.Listen("tcp", loadedConfig.Listen)
 	if err != nil {
-		logger.Error("failed to listen", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("listen: %w", err)
 	}
 	defer listener.Close()
 
@@ -63,11 +76,11 @@ func main() {
 		logger:          logger,
 	}
 	logger.Info("gateway started", "listen", listener.Addr())
-	if err := gateway.serve(shutdownContext, listener); err != nil && !errors.Is(err, net.ErrClosed) {
-		logger.Error("gateway stopped", "error", err)
-		os.Exit(1)
+	if err := gateway.serve(ctx, listener); err != nil && !errors.Is(err, net.ErrClosed) {
+		return fmt.Errorf("serve gateway: %w", err)
 	}
 	logger.Info("gateway stopped")
+	return nil
 }
 
 func loadHostKey(path string) (ssh.Signer, error) {

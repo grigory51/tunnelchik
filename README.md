@@ -46,7 +46,8 @@ install -d -m 0755 /etc/tunnelchik
 ## Запуск
 
 ```bash
-go run . -config /etc/tunnelchik/config.yaml
+cd tunnelchik
+go run . --config /etc/tunnelchik/config.yaml
 ```
 
 ```sshconfig
@@ -74,7 +75,7 @@ asciinema play /var/lib/tunnelchik/recordings/YYYY/MM/DD/session-id/terminal.cas
 ## Container
 
 ```bash
-docker build -t tunnelchik:local .
+docker build -t tunnelchik:local ./tunnelchik
 docker run --rm \
   --read-only \
   --cap-drop=ALL \
@@ -92,6 +93,7 @@ docker run --rm \
 ## Проверка
 
 ```bash
+cd tunnelchik
 go test ./...
 go test -race ./...
 ```
