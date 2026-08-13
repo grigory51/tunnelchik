@@ -75,7 +75,7 @@ asciinema play /var/lib/tunnelchik/recordings/YYYY/MM/DD/session-id/terminal.cas
 ## Container
 
 ```bash
-docker build -t tunnelchik:local ./tunnelchik
+docker build -f docker/Dockerfile -t tunnelchik:local .
 docker run --rm \
   --read-only \
   --cap-drop=ALL \
@@ -88,6 +88,8 @@ docker run --rm \
   tunnelchik:local
 ```
 
+Release images публикуются в `ghcr.io/grigory51/tunnelchik` с semver-тегом и `latest` для стабильных релизов.
+
 Файлы и writable recordings volume на host должны быть доступны UID/GID `65532:65532`. Процесс обрабатывает `SIGTERM`: listener и активные transports закрываются, proxy goroutine завершаются, metadata записи финализируется.
 
 ## Проверка
@@ -97,6 +99,18 @@ cd tunnelchik
 go test ./...
 go test -race ./...
 ```
+
+## Release
+
+Push в `main` запускает `go vet` и `go test -race`. Annotated tag `v*` публикует Linux amd64 container и GitHub Release с архивом binary.
+
+```bash
+make release              # patch: v0.1.0 → v0.1.1
+make release BUMP=minor   # v0.1.1 → v0.2.0
+make release BUMP=major   # v0.2.0 → v1.0.0
+```
+
+Источник версии — git tag; в файлах проекта версия не хранится.
 
 Live deployment, firewall, DNS, NetBird и Ansible role в репозитории `noc` выполняются отдельной задачей после проверки реальных ZITADEL `client_id`, target address и host fingerprint.
 

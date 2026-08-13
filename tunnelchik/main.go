@@ -15,6 +15,8 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+var buildVersion = "dev"
+
 func main() {
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
@@ -29,6 +31,7 @@ func newRootCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:           "tunnelchik",
 		Short:         "SSH gateway with ZITADEL authorization and session recording",
+		Version:       buildVersion,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,

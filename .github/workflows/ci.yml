@@ -1,0 +1,160 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tunnelchik/go.mod
+          cache-dependency-path: tunnelchik/go.sum
+      - name: vet
+        run: go vet ./...
+        working-directory: tunnelchik
+      - name: test
+        run: go test -race ./...
+        working-directory: tunnelchik
+
+  verify:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: wait for main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 180); do
+            result=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow ci.yml \
+              --branch main \
+              --commit "$GITHUB_SHA" \
+              --event push \
+              --limit 1 \
+              --json status,conclusion \
+              --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$result" in
+              "completed success") exit 0 ;;
+              "completed "*) echo "main CI failed: $result"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "main CI did not complete within 30 minutes"
+          exit 1
+
+  push:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tunnelchik
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: |
+            index:org.opencontainers.image.description=SSH gateway with ZITADEL authorization and session recording
+            index:org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/releases
+          build-args: |
+            VERSION=${{ github.ref_name }}
+
+  release:
+    needs: push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: extract binary from image
+        run: |
+          IMAGE="ghcr.io/$GITHUB_REPOSITORY_OWNER/tunnelchik:${GITHUB_REF_NAME#v}"
+          docker pull "$IMAGE"
+          container=$(docker create "$IMAGE")
+          mkdir -p dist/bin
+          docker cp "$container:/tunnelchik" dist/bin/tunnelchik
+          docker rm "$container"
+      - name: package
+        run: |
+          tar -czf "tunnelchik-${{ github.ref_name }}-linux-amd64.tar.gz" -C dist/bin tunnelchik
+          cp "tunnelchik-${{ github.ref_name }}-linux-amd64.tar.gz" tunnelchik-linux-amd64.tar.gz
+      - name: release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          previous_tag=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          if [ -n "$previous_tag" ]; then
+            range="$previous_tag..$TAG"
+            changelog="https://github.com/$GITHUB_REPOSITORY/compare/$previous_tag...$TAG"
+          else
+            range="$TAG"
+            changelog="https://github.com/$GITHUB_REPOSITORY/commits/$TAG"
+          fi
+          {
+            echo "## What's Changed"
+            git log --reverse --format="- %s ([%h](https://github.com/$GITHUB_REPOSITORY/commit/%H))" "$range"
+            echo
+            echo "**Full Changelog**: $changelog"
+          } > release-notes.md
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then
+            set -- --prerelease
+          else
+            set --
+          fi
+          gh release create "$TAG" \
+            "tunnelchik-$TAG-linux-amd64.tar.gz" \
+            tunnelchik-linux-amd64.tar.gz \
+            --notes-file release-notes.md \
+            --verify-tag \
+            "$@"

@@ -18,3 +18,16 @@ func TestRootCommandHelp(t *testing.T) {
 		t.Fatalf("help does not contain config flag: %q", output.String())
 	}
 }
+
+func TestRootCommandVersion(t *testing.T) {
+	command := newRootCommand()
+	var output bytes.Buffer
+	command.SetOut(&output)
+	command.SetArgs([]string{"--version"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), buildVersion) {
+		t.Fatalf("version output does not contain build version: %q", output.String())
+	}
+}
