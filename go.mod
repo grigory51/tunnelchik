@@ -1,4 +1,4 @@
-module github.com/grigory51/tunnelchik/tunnelchik
+module github.com/grigory51/tunnelchik
 
 go 1.25.0
 

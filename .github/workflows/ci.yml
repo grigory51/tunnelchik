@@ -20,14 +20,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: tunnelchik/go.mod
-          cache-dependency-path: tunnelchik/go.sum
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: vet
         run: go vet ./...
-        working-directory: tunnelchik
       - name: test
         run: go test -race ./...
-        working-directory: tunnelchik
 
   verify:
     if: startsWith(github.ref, 'refs/tags/v')

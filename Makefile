@@ -1,13 +1,13 @@
 .PHONY: test vet build release
 
 test:
-	cd tunnelchik && go test -race ./...
+	go test -race ./...
 
 vet:
-	cd tunnelchik && go vet ./...
+	go vet ./...
 
 build:
-	cd tunnelchik && go build ./...
+	go build -o tunnelchik/tunnelchik ./tunnelchik
 
 BUMP ?= patch
 release:

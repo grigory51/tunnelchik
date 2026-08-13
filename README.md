@@ -46,8 +46,7 @@ install -d -m 0755 /etc/tunnelchik
 ## Запуск
 
 ```bash
-cd tunnelchik
-go run . --config /etc/tunnelchik/config.yaml
+go run ./tunnelchik --config /etc/tunnelchik/config.yaml
 ```
 
 ```sshconfig
@@ -95,7 +94,6 @@ Release images публикуются в `ghcr.io/grigory51/tunnelchik` с semve
 ## Проверка
 
 ```bash
-cd tunnelchik
 go test ./...
 go test -race ./...
 ```
